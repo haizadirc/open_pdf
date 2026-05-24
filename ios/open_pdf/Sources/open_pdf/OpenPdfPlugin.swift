@@ -2,7 +2,9 @@ import Flutter
 import UIKit
 
 public class OpenPdfPlugin: NSObject, FlutterPlugin, UIDocumentInteractionControllerDelegate {
-  var documentController: UIDocumentInteractionController?
+  
+  // 1. TAMBAH INI: Simpan reference yang kuat (strong reference)
+  private var documentController: UIDocumentInteractionController?
 
   public static func register(with registrar: FlutterPluginRegistrar) {
     let channel = FlutterMethodChannel(name: "open_pdf", binaryMessenger: registrar.messenger())
@@ -11,36 +13,52 @@ public class OpenPdfPlugin: NSObject, FlutterPlugin, UIDocumentInteractionContro
   }
 
   public func handle(_ call: FlutterMethodCall, result: @escaping FlutterResult) {
-    switch call.method {
-    case "open":
+    if call.method == "open" {
       guard let args = call.arguments as? [String: Any],
             let filePath = args["filePath"] as? String else {
-        result(false)
+        result(FlutterError(code: "INVALID_ARGUMENT", message: "File path is required", details: nil))
         return
       }
       
       let fileURL = URL(fileURLWithPath: filePath)
-      documentController = UIDocumentInteractionController(url: fileURL)
-      documentController?.delegate = self
-      
-      if let rootViewController = UIApplication.shared.delegate?.window??.rootViewController {
-        let opened = documentController?.presentPreview(animated: true) ?? false
-        if !opened {
-           // If presentPreview fails, try presentOpenInMenu
-           let openedInMenu = documentController?.presentOpenInMenu(from: rootViewController.view.bounds, in: rootViewController.view, animated: true) ?? false
-           result(openedInMenu)
-        } else {
-           result(true)
-        }
-      } else {
-        result(false)
+      if !FileManager.default.fileExists(atPath: filePath) {
+        result(FlutterError(code: "FILE_NOT_FOUND", message: "File does not exist", details: nil))
+        return
       }
-    default:
+
+      DispatchQueue.main.async {
+        // 2. KEMASKINI INI: Guna self.documentController
+        self.documentController = UIDocumentInteractionController(url: fileURL)
+        self.documentController?.delegate = self
+        
+        if let window = UIApplication.shared.windows.first(where: { $0.isKeyWindow }),
+           let rootViewController = window.rootViewController {
+           
+           var topController = rootViewController
+           while let presented = topController.presentedViewController {
+               topController = presented
+           }
+           
+           // 3. KEMASKINI INI: Panggil presentPreview dari self.documentController
+           let canOpen = self.documentController?.presentPreview(animated: true) ?? false
+           if !canOpen {
+               self.documentController?.presentOptionsMenu(from: topController.view.bounds, in: topController.view, animated: true)
+           }
+           result(true)
+        } else {
+           result(false)
+        }
+      }
+    } else {
       result(FlutterMethodNotImplemented)
     }
   }
 
   public func documentInteractionControllerViewControllerForPreview(_ controller: UIDocumentInteractionController) -> UIViewController {
-    return UIApplication.shared.delegate?.window??.rootViewController ?? UIViewController()
+    var topController = UIApplication.shared.windows.first(where: { $0.isKeyWindow })?.rootViewController
+    while let presented = topController?.presentedViewController {
+        topController = presented
+    }
+    return topController ?? UIViewController()
   }
 }
